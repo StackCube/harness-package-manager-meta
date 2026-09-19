@@ -4,6 +4,8 @@ Small items found by the M0 reviews and deliberately not fixed in M0. None block
 
 ## Contract (next release)
 
+- [ ] Harness id enums need `"type": "string"`. Without it oapi-codegen types `harnesses` as `[]interface{}`. (Found while planning M1; M1-A Task 1 does it.)
+
 - [ ] `openapi.yaml`: declare `400` on `getPackage` and `getArchive` (they carry the patterned path parameters `spec/errors.md` says produce `bad_request`), and `403` on the read operations if `scope_forbidden` can apply to reads; otherwise narrow the wording in `spec/errors.md`. The two documents must agree on where each code can arise.
 - [ ] `openapi.yaml`: `PackageInfo.versions` items need the version pattern, like `latest`.
 - [ ] Add a consistency test for the four-id harness enum, which is inlined in five places across the schemas.
@@ -37,7 +39,7 @@ Small items found by the M0 reviews and deliberately not fixed in M0. None block
 ## Docs
 
 - [ ] `docs/prd.md` §9 routes table still says `GET /index` returns "harness folders present". It returns harness ids.
-- [ ] Meta `README.md` status line: update once the two M0 pull requests are merged.
+- [x] Meta `README.md` status line: update once the two M0 pull requests are merged.
 
 ## Known and accepted
 

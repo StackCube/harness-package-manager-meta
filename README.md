@@ -30,6 +30,7 @@ metastack status    # branch + working-tree state per repo
 
 - [Product requirements document](docs/prd.md) — the full PRD, currently draft v0.7
 - [Iteration 1 technical design](docs/superpowers/specs/2026-09-19-iteration-1-technical-design.md) — contract, architecture, testing and the eight milestones
+- [M1 plan overview](docs/superpowers/plans/2026-09-19-m1-overview.md) — the walking skeleton, in three parts
 - [Iteration 1 prototype](docs/prd.md#20-iteration-1-prototype) — what the repos above build first
 - [Decision log](docs/prd.md#22-decision-log) — every settled question and where it is written up
 
@@ -41,4 +42,4 @@ metastack status    # branch + working-tree state per repo
 
 ## Status
 
-Draft. The CLI name `hpm` is a placeholder. Milestone 0 is built: the contract is at v0.1.0, and `cli` and `registry` are scaffolded against it with green CI on open pull requests. Next is M1, the walking skeleton.
+Draft. The CLI name `hpm` is a placeholder. Milestone 0 is done: the contract is at v0.2.0, and `cli` and `registry` are scaffolded against it on `main` with CI. Next is M1, the walking skeleton, planned in three parts under `docs/superpowers/plans/`.
