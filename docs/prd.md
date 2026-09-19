@@ -1,6 +1,6 @@
 # Harness Package Manager
 
-**Product requirements · working draft v0.5 · 19 Sep 2026**
+**Product requirements · working draft v0.6 · 19 Sep 2026**
 Owner: Rick Whalley · Audience: platform team, harness authors, engineering leads
 CLI name: `hpm` is a placeholder throughout.
 
@@ -207,7 +207,7 @@ One toolkit, four components, one shared script. The resolver picks a single ver
 > *Rejected:* renaming assets per version to allow coexistence. Breaks the stable names that commands and skills use to reference each other.
 
 > **Decided: Installed names drop the scope, with an alias escape hatch.**
-> `@org/tdd-loop` installs as `skills/tdd-loop/` and its command is `/tdd-loop`. People type these names in sessions and read them in docs, so the short form has real value. Two packages from different scopes with the same short name collide, and install fails naming both. The project manifest can then set an alias for one of them.
+> `@org/tdd-loop` installs as `skills/tdd-loop/` and its command is `/tdd-loop`. People type these names in sessions and read them in docs, so the short form has real value. Two packages from different scopes with the same short name collide, and install fails naming both. The project manifest can then set an alias for one of them. Aliasing a package that has dependents in the project is refused, and the error names them, because a command that references the original name would otherwise fail silently in a session.
 > *Rejected:* scope as a permanent prefix. Never collides, but every engineer pays for it on every command forever.
 
 > **Decided: File ownership is exclusive.**
@@ -217,7 +217,7 @@ One toolkit, four components, one shared script. The resolver picks a single ver
 > A meta package declares caret ranges so that consumers pick up patch and minor fixes on update. The project lockfile pins exact versions and hashes so that two clones of the project are identical.
 
 > **Decided: Scopes route to registries.**
-> The project manifest maps each scope to a registry URL. A client project can take `@ourorg/*` from our instance and `@client/*` from theirs. Dependencies across registries resolve normally. A meta package in one registry may depend on packages in another, and the lockfile records which registry each package came from.
+> The project manifest maps each scope to a registry URL. A client project can take `@ourorg/*` from our instance and `@client/*` from theirs. The lockfile records which registry each package came from. Dependencies resolve within one registry only: a package may not depend on a package in a different registry. A client who wants one of our packages inside their own toolkit publishes a copy into their instance under their scope, with the source recorded in the manifest, which `hpm copy` makes one command in iteration 2. This keeps each instance self-contained, which is what per-client isolation is for, and means a consumer never needs a login to a second instance to resolve a transitive dependency.
 
 **Later: optional groups.** A meta package may eventually declare optional members installable by name, in the style of pip extras. Deferred until a real toolkit needs it.
 
@@ -291,7 +291,21 @@ Example, a Claude hook fragment merging into a project's existing settings:
 
 ### Adopt: the reverse mapping
 
-Adapters also run backwards. Given a tree, an adapter lists the files under its root that look like assets, and the CLI hashes them against every version in the configured registries. Exact matches become managed entries in a new lockfile at that version. Near matches, where the path matches a known package but the content does not, are offered as either modified at the closest version or as candidates to publish as a new version. Files that match nothing are listed for the engineer to decide. Pack is the same mapping used to build an archive from the tree.
+Adapters also run backwards. Given a tree, an adapter lists the files under its root that look like assets, and the CLI hashes them against every version in the configured registries. Exact matches become managed entries in a new lockfile at that version. Near matches, where the path matches a known package but the content does not, are resolved by finding the closest published version by diff size and then asking the engineer. Files that match nothing are listed for the engineer to decide. Pack is the same mapping used to build an archive from the tree.
+
+> **Decided: Near matches find the closest version by diff, then ask.**
+> Adopt fetches each published version of the file, diffs, and picks the smallest. It then prompts, one line per near match:
+>
+> ```
+> @ourorg/tdd-loop  .claude/skills/tdd-loop/SKILL.md
+>   You've made changes to 1.2.0 (14 lines differ). The latest version is 1.4.2.
+>   [k] keep my changes, record as modified at 1.2.0
+>   [u] upgrade to 1.4.2 and discard my changes
+>   [d] show my diff against 1.2.0
+>   [s] skip, leave untracked
+> ```
+>
+> Upgrade discards in iteration 1, and the prompt says so. In iteration 2 a fourth choice appears: upgrade and carry my changes as a patch. Non-interactive runs, with a yes flag or in CI, record every near match as modified at its closest version and print the same lines without prompting. Nothing is discarded without a person choosing it.
 
 ## 9. Registry instance
 
@@ -545,6 +559,7 @@ Semver only works if authors agree on what a breaking change is. For a skill, th
 | `hpm publish [pkg\|dir]` | Pack a package directory, or a package's installed files in the current tree, and send it to its scope's registry as the logged-in person. | 1 |
 | `hpm search` · `hpm info` | Query the index, print README. | 1 |
 | `hpm outdated` | Installed vs latest satisfying vs latest overall. | 2 |
+| `hpm copy @ourorg/tdd-loop --to @acme` | Re-publish a package from one registry into another under a new scope, recording the source. | 2 |
 | `hpm doctor` | Check env vars, binaries, harness versions for everything installed. | 2 |
 | `hpm patch` · `hpm eject` · `hpm revert` | Move a package between states. | 2 |
 | `hpm rebase` | Three-way merge an ejected package back onto a managed upstream version. | 3 |
@@ -701,10 +716,11 @@ Copilot, Kiro and Codex adapters. The website. Doctor. Patches and eject. Link. 
 | Trigger description changes | Minor bump with a mandatory changelog line, enforced by the registry when frontmatter changes. | §11, §14 |
 | Claude Code adapter and plugins | Write into the project tree. Keep the claude folder plugin-compatible. | §8 |
 | Reader access | Through the Worker, behind Access. Read rights are per instance. | §9 |
+| Adopt near matches | Closest version by diff size, then prompt the engineer: keep, upgrade and discard, show diff, or skip. Non-interactive defaults to keep. | §8 |
+| Aliases and dependents | Refuse to alias a package that has dependents in the project. The error names them. | §7 |
+| Cross-registry dependencies | Forbidden. Dependencies resolve within one registry. `hpm copy` re-publishes a package into another instance. | §7 |
 | Provenance | Publisher identity and timestamp from the Access JWT. Source commit optional. | §18 |
 
 ## 23. Open questions
 
-1. **Adopt's near-match threshold.** When a file sits at a known package path but its content matches no version, adopt has to pick a closest version to call it modified against. Whether that is the version with the smallest diff, the latest, or a prompt to the engineer decides how noisy the first run on a client repo is.
-2. **Aliases and cross-references.** A command in one package that references a skill by name will not find it if the project aliased that skill. Proposal: refuse aliasing a package that has dependents in the project.
-3. **Cross-registry dependencies and identity.** A meta package in our instance depending on a package in a client's instance means a consumer needs a login to both. That is fine for our engineers and awkward for the client's. Decide whether meta packages may depend across registries at all, or only within one.
+None open as of v0.6. Every question raised during drafting is resolved in the decision log above. New questions go here as they arise during iteration 1.
