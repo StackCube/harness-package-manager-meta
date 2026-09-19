@@ -24,6 +24,15 @@ repos:
   - name: packages
     url: StackCube/harness-package-manager-packages
 
+  # Shared Homebrew tap for the StackCube suite. The hpm CLI's release
+  # publishes its formula here.
+  - name: tap
+    url: StackCube/homebrew-tap
+
+  # docs.stackcube.dev site source. User-facing hpm documentation lives here.
+  - name: docs
+    url: StackCube/docs.stackcube.dev
+
 # Tools verified by `metastack doctor`.
 #   command:     smoke test (non-zero exit = fail)
 #   min_version: optional; semver-ish parse from stdout

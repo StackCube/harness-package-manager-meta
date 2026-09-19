@@ -1,8 +1,9 @@
 # Harness Package Manager
 
-**Product requirements · working draft v0.6 · 19 Sep 2026**
+**Product requirements · working draft v0.7 · 19 Sep 2026**
 Owner: Rick Whalley · Audience: platform team, harness authors, engineering leads
 CLI name: `hpm` is a placeholder throughout.
+Technical design for iteration 1: [superpowers/specs/2026-09-19-iteration-1-technical-design.md](superpowers/specs/2026-09-19-iteration-1-technical-design.md).
 
 Versioned, composable distribution of skills, commands, agents, hooks, scripts and MCP configs across Claude Code, Kiro, GitHub Copilot and Codex, from a registry we deploy per client into repos we do not own.
 
@@ -166,12 +167,13 @@ The registry instance is the only thing we own. A person publishes from wherever
 
 Components and their single job:
 
+- **Contract.** A separate repo holding the OpenAPI 3.1 description of the registry routes, JSON Schemas for the package manifest, project manifest, lockfile and index, a normative archive and hashing spec, and golden test vectors. It is subtreed into the CLI and registry repos at a tagged version. The CLI is Go and the Worker is TypeScript, so the vectors are what proves the two agree on bytes and not just on types.
 - **Package directories.** Anywhere with an `hpm.json`. Our monorepo, a client repo, or a project tree.
 - **Publisher.** The `hpm publish` command, run by a person or by CI holding a service token. Packs an archive and sends it to the registry with an Access identity.
 - **Cloudflare Access.** Sits in front of every registry route. Authenticates the person against the client's identity provider and attaches a signed JWT to the request. Trusts a person, not a device.
 - **Worker.** Verifies the JWT, checks the identity against scope rules, validates the manifest and archive, refuses republishing an existing version, computes hashes, writes the archive to R2 and the metadata to D1, serves the index and archives to readers.
 - **R2 and D1.** Archives in R2, immutable. Packages, versions, scopes and their members in D1. The index is a query, not a file that can race.
-- **CLI.** Resolves the project manifest against each scope's registry, fetches and verifies archives, copies files through adapters, writes the lockfile, adopts existing trees, packs trees back into archives.
+- **CLI.** A single Go binary, distributed through `updates.stackcube.dev` and the StackCube Homebrew tap. Resolves the project manifest against each scope's registry, fetches and verifies archives, copies files through adapters, writes the lockfile, adopts existing trees, packs trees back into archives. Every mutating command builds a complete plan against a read-only snapshot of the tree, checks it for conflicts, and only then writes, with the lockfile last.
 - **Adapters.** One per harness. A root mapping, merge rules for a short list of shared files, and ownership tracking.
 - **Catalogue site.** A Pages app behind the same Access application, reading the Worker. Later.
 
@@ -207,7 +209,7 @@ One toolkit, four components, one shared script. The resolver picks a single ver
 > *Rejected:* renaming assets per version to allow coexistence. Breaks the stable names that commands and skills use to reference each other.
 
 > **Decided: Installed names drop the scope, with an alias escape hatch.**
-> `@org/tdd-loop` installs as `skills/tdd-loop/` and its command is `/tdd-loop`. People type these names in sessions and read them in docs, so the short form has real value. Two packages from different scopes with the same short name collide, and install fails naming both. The project manifest can then set an alias for one of them. Aliasing a package that has dependents in the project is refused, and the error names them, because a command that references the original name would otherwise fail silently in a session.
+> `@org/tdd-loop` installs as `skills/tdd-loop/` and its command is `/tdd-loop`. People type these names in sessions and read them in docs, so the short form has real value. Two packages from different scopes with the same short name collide, and install fails naming both. The project manifest can then set an alias for one of them. Aliasing a package that has dependents in the project is refused, and the error names them, because a command that references the original name would otherwise fail silently in a session. Iteration 1 detects and refuses collisions but does not apply aliases. A non-empty `aliases` field is rejected until iteration 2.
 > *Rejected:* scope as a permanent prefix. Never collides, but every engineer pays for it on every command forever.
 
 > **Decided: File ownership is exclusive.**
@@ -268,7 +270,7 @@ codex/AGENTS.append.md         → <project>/AGENTS.md
 ```
 
 - **Markdown.** First install appends a block to the end of the file, wrapped in begin and end comments naming the package and version. Update replaces the block in place. Removal deletes it. Drift is a hash of the block's content. Text outside the markers is never touched, and order is install order, located by the markers rather than recorded anywhere.
-- **JSON and TOML.** The adapter parses both files and walks the fragment. A key missing from the target is inserted and its path recorded. An object on both sides is recursed into. An array on both sides has the fragment's elements appended, each recorded by content hash because indices shift. A scalar on both sides with different values stops the install and shows both, rather than overwriting. Removal walks the recorded paths and deletes only those. Update is remove then insert. The lockfile is where the markers live.
+- **JSON and TOML.** The adapter parses both files and walks the fragment. Containers are never owned, only leaves. An object or array missing from the target is created and recorded as a created container. An object on both sides is recursed into. A scalar missing from the target is inserted and recorded by JSON Pointer with a hash of its value. An array element is atomic: it is appended and recorded by the hash of its canonical JSON, because indices shift, and an identical element already present is left alone and not owned. A scalar on both sides with the same value is left alone and not owned. A scalar on both sides with different values stops the install and shows both, rather than overwriting. Removal deletes the recorded leaves, then prunes only the containers that package created that are now empty. Update is remove then insert. The lockfile is where the markers live. Leaf ownership is what lets one package append a hook to an array another package created, and lets either be removed cleanly.
 - **Edits must preserve the file.** The adapter must not round-trip the target through parse and stringify. That reformats the whole file and strips comments, some targets are JSON with comments, and every install would become a noisy diff in a repo we do not own. Use an edit-preserving library that computes minimal text edits against the original, of the kind VS Code uses for its own settings files.
 - **Merge is additive only.** A package can add a hook, an MCP server, or a permission entry. It cannot change or remove anything the project set by hand. Hand edits outside recorded paths and marker blocks survive updates. Hand edits inside them are reported as drift.
 - **Prefer no merge where the harness allows it.** Copilot reads individual instruction files from a directory and Kiro reads individual steering files, so guidance for those harnesses is a plain copy. Merging is only for harnesses whose config is a single file.
@@ -283,7 +285,7 @@ Example, a Claude hook fragment merging into a project's existing settings:
 { "permissions": { "allow": ["Bash(npm test)"] }, "hooks": { "PreToolUse": [ /* project's own */ ] } }
 
 // target after: PostToolUse array created, one element appended, permissions untouched
-// lockfile records: hooks.PostToolUse[sha256-…] owned by @org/formatter@1.2.0
+// lockfile records for @org/formatter@1.2.0: leaf /hooks/PostToolUse element sha256-…, created container /hooks/PostToolUse
 ```
 
 > **Decided: Claude Code: write into the tree, keep the layout plugin-compatible.**
@@ -317,14 +319,21 @@ Adapters also run backwards. Given a tree, an adapter lists the files under its 
 > **Decided: Cloudflare Access is the identity layer. Trust the person, not the device.**
 > Every route on the Worker sits behind an Access application. Access authenticates the person against the client's identity provider and attaches a signed JWT to the request. The Worker verifies the JWT against the team's public keys and reads the identity from it. Scope rules in D1 map identities or identity-provider groups to publish rights per scope. Read rights are per instance: anyone Access admits may read every package in that instance. Device posture is not checked.
 > The CLI obtains its token the way Cloudflare's own tooling does: a browser login for the hostname, cached locally, refreshed when it expires. CI uses an Access service token, which is a client id and secret pair, and the Worker treats it as a named non-person identity that scope rules can grant publish rights to.
+> Access federates to the client's identity provider, whether Entra, Google, Okta or generic SAML and OIDC, so enterprise login works from the first instance. Both sides still sit behind a seam so that Cloudflare can be replaced. The Worker verifies a JWT against a configured issuer, key set, audience and header, and maps claims to a neutral identity. The CLI has an auth provider per registry. Access is the only provider in iteration 1. A direct OIDC issuer is a later drop-in.
 
 > **Decided: The Worker is the only writer.**
-> Publishing means calling the Worker with an archive. It checks the identity against the package's scope, validates the manifest against the schema, refuses a version that already exists, refuses an archive with no README, no changelog entry for the version, or a file matching env-file patterns, computes the hash, writes the archive to R2, and inserts the version into D1. The index is a query over D1, so there is no index file to race on.
+> Publishing means calling the Worker with an archive. It checks the identity against the package's scope, validates the manifest against the schema, refuses a version that already exists, refuses an archive with no README, no changelog entry for the version, an unfilled scaffold marker, or a file matching env-file patterns, computes the hash, writes the archive to R2, and inserts the version into D1. The index is a query over D1, so there is no index file to race on.
 
 > **Decided: No git-ref dependencies.**
 > A project cannot depend on an unpublished branch or commit. Every installed archive came through the Worker, was validated, and has a hash in the index. Local iteration uses `link`. Cross-project trials publish under the `next` dist-tag.
 
+> **Decided: Pulumi owns infrastructure, wrangler owns code.**
+> One Pulumi stack per client creates the R2 bucket, D1 database, DNS record, Access application, policy and CI service token. A deploy script runs the stack, renders the wrangler configuration from its outputs, applies D1 migrations, deploys the Worker, seeds scope members and runs a smoke test.
+> *Rejected:* a hand-written script against the Cloudflare API, which re-implements idempotency. A dashboard runbook, which is not reproducible.
+
 ### Routes
+
+All routes are prefixed `/v1`, omitted from the table for brevity. Errors share one JSON shape with a stable `code` that the CLI switches on.
 
 | Route | Does | Iteration 1 |
 |---|---|---|
@@ -417,7 +426,7 @@ packages/tdd-loop/
 
 **In a project tree**, which is how a client author works. Assets stay where the harness reads them and the three files live under `.hpm/packages/@acme/adr-writer/`. The author edits the same three files, just in that location.
 
-Nobody writes these from a blank page. `hpm new @ourorg/tdd-loop --harness claude` scaffolds all three plus a skill stub, and `hpm new @acme/legacy-deploy --from .claude/skills/legacy-deploy` does the same in a project tree for a skill that already exists. The scaffold leaves placeholders marked `TODO`, and publish refuses while any remain.
+Nobody writes these from a blank page. `hpm new @ourorg/tdd-loop --harness claude` scaffolds all three plus a skill stub, and `hpm new @acme/legacy-deploy --from .claude/skills/legacy-deploy` does the same in a project tree for a skill that already exists. The scaffold leaves placeholders marked `HPM-TODO`, and publish refuses while any remain. The marker is specific because a bare `TODO` is legitimate prose in a skill.
 
 ### The manifest
 
@@ -477,7 +486,7 @@ The changelog follows the Keep a Changelog convention: one section per version w
 
 The registry enforces three things on publish:
 
-1. The section for the version being published must exist and be non-empty.
+1. The section for the version being published must exist and be non-empty. This applies to every version, including the first.
 2. The version in the manifest must be higher than any published version.
 3. If the trigger description in any skill's frontmatter differs from the previous published version, the section must contain a line starting with `Trigger:`. This is how the minor-plus-changelog rule in section 14 becomes a check instead of a convention, and it is what update prints when a project crosses that version.
 
@@ -575,7 +584,7 @@ Both files are committed in the client's repo. The manifest is edited by people.
   "harnesses": ["claude-code", "kiro"],
   "registries": {
     "@ourorg": "https://hpm.ourorg.example",
-    "@acme":   "https://hpm.acme.example"
+    "@acme":   { "url": "https://hpm.acme.example", "auth": "cloudflare-access" }
   },
   "dependencies": {
     "@ourorg/backend-toolkit": "^3.1",
@@ -585,6 +594,8 @@ Both files are committed in the client's repo. The manifest is edited by people.
   "unsupported": "warn"
 }
 ```
+
+A registry entry is a URL, or an object with `url` and `auth`. The URL form means the default auth provider, which is Cloudflare Access.
 
 ```jsonc
 // hpm.lock — written by the tool
@@ -607,7 +618,15 @@ Both files are committed in the client's repo. The manifest is edited by people.
       "registry": "https://hpm.ourorg.example",
       "integrity": "sha256-77be…",
       "state": "managed",
-      "managedEntries": { ".mcp.json": ["mcpServers.jira"] },
+      "managedEntries": {
+        ".mcp.json": {
+          "leaves": [
+            { "ptr": "/mcpServers/jira/command", "value": "sha256-…" },
+            { "ptr": "/mcpServers/jira/args", "element": "sha256-…", "indexHint": 0 }
+          ],
+          "createdContainers": ["/mcpServers/jira", "/mcpServers/jira/args"]
+        }
+      },
       "missingHarness": ["kiro"]
     },
     "@acme/adr-writer": {
@@ -624,7 +643,7 @@ Both files are committed in the client's repo. The manifest is edited by people.
 
 ## 17. Discoverability and the website
 
-The Worker refuses a publish without a `README.md`, and from the second version onward refuses one whose `CHANGELOG.md` has no entry for the version. Required manifest metadata: name, version, description, keywords, owners. Optional: a source URL. Harness support is derived from the folders present.
+The Worker refuses a publish without a `README.md`, and refuses one whose `CHANGELOG.md` has no entry for the version, including the first. Required manifest metadata: name, version, description, keywords, owners. Optional: a source URL. Harness support is derived from the folders present.
 
 The website is a Pages app deployed alongside each registry instance, behind the same Access application, reading the Worker. Per package it shows: install snippet, versions with dates and changelog entries, dependencies and dependents, which harness folders each version ships, env vars required, deprecation notices. Overall: search, browse by keyword and harness, and recommended toolkits pinned at the top. Iteration 2.
 
@@ -655,18 +674,23 @@ The website is a Pages app deployed alongside each registry instance, behind the
 
 The smallest thing that proves the model end to end on a real client tree. Everything not listed here is deferred, on purpose.
 
+### Contract
+
+- A contract repo with the OpenAPI 3.1 description, JSON Schemas, the archive and hashing spec, and golden vectors, subtreed into the CLI and registry repos.
+
 ### Registry
 
 - One Worker with the four iteration 1 routes from section 9: index, package, archive, publish.
 - R2 for archives, D1 with three tables: packages, versions, scope members. Scope members seeded from a config file at deploy time.
 - An Access application covering the Worker hostname. JWT verification in the Worker. Service tokens accepted and treated as named identities.
-- One deploy configuration that stands up all of it for a named client. Deploy our own instance first, a client's second.
+- One deploy configuration that stands up all of it for a named client: a Pulumi stack for infrastructure, wrangler for code and migrations. Deploy our own instance first, a client's second.
 
 ### CLI
 
+- A Go binary, installed from the StackCube Homebrew tap.
 - login, init, adopt, new, add, install, update, status, version, publish, search, info.
 - Claude Code adapter only. Copy plus managed regions for `CLAUDE.md`, `.claude/settings.json` and `.mcp.json`.
-- Resolver with single-version-per-project and meta packages. Scope-to-registry routing.
+- Resolver with single-version-per-project and meta packages, as a fixpoint without backtracking. Scope-to-registry routing.
 - Lockfile with managed, modified and unmatched states. Patch, eject and rebase come in iteration 2.
 - The `.hpm/` directory with per-package manifest, README and changelog.
 
@@ -675,9 +699,13 @@ The smallest thing that proves the model end to end on a real client tree. Every
 - Our existing central repo restructured into package directories with a `claude/` folder each, plus one meta package for the toolkit our 4 projects share.
 - Adopt run against all 4 projects. The unmatched list is the first backlog.
 
+### Build order
+
+Eight milestones, each ending in something demonstrable: contract and scaffolding, a walking skeleton from publish to status, deploy with real identity, the package model, the merge engine, tree as source, adopt, then content and rollout. The technical design has the detail.
+
 ### Explicitly not in iteration 1
 
-Copilot, Kiro and Codex adapters. The website. Doctor. Patches and eject. Link. Deprecation and dist-tag routes. Optional groups. Telemetry. Signing.
+Copilot, Kiro and Codex adapters. Aliases. A second auth provider. The website. Doctor. Patches and eject. Link. Deprecation and dist-tag routes. Optional groups. Telemetry. Signing.
 
 ## 21. Phasing after iteration 1
 
@@ -720,7 +748,18 @@ Copilot, Kiro and Codex adapters. The website. Doctor. Patches and eject. Link. 
 | Aliases and dependents | Refuse to alias a package that has dependents in the project. The error names them. | §7 |
 | Cross-registry dependencies | Forbidden. Dependencies resolve within one registry. `hpm copy` re-publishes a package into another instance. | §7 |
 | Provenance | Publisher identity and timestamp from the Access JWT. Source commit optional. | §18 |
+| CLI language and distribution | Go. Binaries on `updates.stackcube.dev`, formula in the StackCube Homebrew tap. | §6, §20 |
+| Wire contract | A separate repo: OpenAPI 3.1, JSON Schema, archive spec, golden vectors. Subtreed into the CLI and registry. | §6, §20 |
+| Route versioning | Every route is prefixed `/v1`. One error shape with stable codes. | §9 |
+| Identity portability | Access stays. Worker verification and CLI login sit behind a provider seam so a direct OIDC issuer can replace it. | §9, §16 |
+| Registry deployment | Pulumi stack per client for infrastructure. Wrangler for code and migrations. | §9 |
+| CLI mutation model | Plan against a snapshot, check conflicts, then apply. Lockfile last. | §6 |
+| Merge ownership | Containers are never owned. Scalars by JSON Pointer, array elements by content hash, created containers pruned when empty. | §8, §16 |
+| Changelog on first publish | Required on every version. | §11, §17 |
+| Scaffold marker | `HPM-TODO`, checked by the CLI and the Worker. | §11 |
+| Aliases in iteration 1 | Collisions refused. Aliases applied from iteration 2. | §7, §20 |
+| Resolver algorithm | Fixpoint without backtracking in iteration 1. | §20 |
 
 ## 23. Open questions
 
-None open as of v0.6. Every question raised during drafting is resolved in the decision log above. New questions go here as they arise during iteration 1.
+None open as of v0.7. Every question raised during drafting is resolved in the decision log above. New questions go here as they arise during iteration 1.
