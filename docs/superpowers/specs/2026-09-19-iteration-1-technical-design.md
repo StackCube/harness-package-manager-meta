@@ -11,14 +11,14 @@ The PRD says what the product does and why. This document says how iteration 1 i
 
 | Name | Repo | Language | Role |
 |---|---|---|---|
-| `contract` | StackCube/harness-package-manager-contract (created in M0) | OpenAPI, JSON Schema | The wire contract and golden vectors. Subtreed into `cli` and `registry`. |
+| `contract` | StackCube/harness-package-manager-contract (created in M0) | OpenAPI, JSON Schema | The wire contract and golden vectors. Imported into `cli` and `registry`. |
 | `registry` | StackCube/harness-package-manager-registry | TypeScript | Worker, D1 migrations, Pulumi program, deploy script. |
 | `cli` | StackCube/harness-package-manager-cli | Go | The `hpm` binary, adapters, end-to-end tests. |
 | `packages` | StackCube/harness-package-manager-packages | Markdown, scripts | Our own package source. |
 | `tap` | StackCube/homebrew-tap | Ruby | Shared Homebrew tap. Receives `Formula/hpm.rb`. |
 | `docs` | StackCube/docs.stackcube.dev | Static HTML | Receives an `/hpm/` section. |
 
-`contract` is pulled into `cli` and `registry` with `git subtree` at `contract/`, always at a tagged version. CI in both consumers checks that the subtree matches a contract tag and runs the vector tests.
+`contract` is imported into `cli` and `registry` at `contract/` as the exact tree of a tag, by each repo's `scripts/contract-pull.sh`. This is a plain tree import, not `git subtree`: consumers never edit `contract/`, so there is nothing to merge, and it does not depend on how the commit that last imported the contract was merged — squash, rebase or merge commit all work the same. `contract.lock` records the tag and the tree hash, and `scripts/check-contract.sh` verifies both offline in CI, along with `contract/VERSION`. It also runs the vector tests.
 
 ## 2. Contract
 
@@ -29,7 +29,12 @@ schemas/                JSON Schema 2020-12, referenced from openapi.yaml
   project-manifest.json   hpm.json in a project
   lockfile.json           hpm.lock
   index.json              GET /v1/index response
-spec/archive.md         normative prose: archive format, hashing, canonical JSON, path rules, refusals
+spec/                   normative prose
+  archive.md              archive format, hashing, canonical JSON, path rules, refusal order
+  errors.md               the one error shape, every code with its HTTP status and meaning
+  harnesses.md            harness ids and the id → package folder table
+  semver.md               versions, ranges and the pick rule
+  changelog.md            CHANGELOG.md section parsing
 vectors/                golden fixtures both implementations must pass
   archives/   directory → expected tar.gz sha256 and per-file hashes
   manifests/  valid/ and invalid/, each invalid case with its expected error code
@@ -42,9 +47,11 @@ CHANGELOG.md            the contract is semver-tagged
 ### Decisions
 
 - **Routes are prefixed `/v1`.** `GET /v1/index`, `GET /v1/pkg/:scope/:name`, `GET /v1/archive/:scope/:name/:version`, `PUT /v1/pkg/:scope/:name/:version`.
-- **One error shape.** `{ "code": string, "message": string, "details": object }`. Codes are stable and enumerated in the OpenAPI spec: `unauthenticated`, `scope_forbidden`, `version_exists`, `version_not_higher`, `manifest_invalid`, `name_mismatch`, `readme_missing`, `changelog_missing`, `trigger_line_missing`, `scaffold_marker_present`, `env_file_present`, `path_forbidden`, `archive_too_large`, `archive_invalid`, `not_found`. The CLI switches on `code`, never on message text.
+- **One error shape.** `{ "code": string, "message": string, "details": object }`. Codes are stable and enumerated in the OpenAPI spec: `unauthenticated`, `scope_forbidden`, `version_exists`, `version_not_higher`, `manifest_invalid`, `name_mismatch`, `readme_missing`, `changelog_missing`, `trigger_line_missing`, `scaffold_marker_present`, `env_file_present`, `path_forbidden`, `archive_too_large`, `archive_invalid`, `not_found`, `bad_request`, `internal_error`. The CLI switches on `code`, never on message text, and treats an unrecognised code as a generic failure, so adding a code is a minor change. `spec/errors.md` maps every code to its HTTP status. Infrastructure in front of the registry may answer with something that is not JSON at all, so the CLI must handle a non-JSON error body.
 - **Archive format.** `tar.gz`. The root of the archive is the package directory's content, with `hpm.json` at the top level. The CLI packs deterministically: paths sorted bytewise, mtime, uid and gid zeroed, modes limited to 0644 and 0755, no extended headers. The registry stores the bytes it receives, so determinism is for reproducibility, not correctness.
-- **Refused in an archive.** Symlinks and hard links, absolute paths, any path containing `..`, files matching env-file patterns (`.env`, `.env.*` except `.env.example`, `*.env`), and archives over 10 MB compressed.
+- **Refused in an archive.** Symlinks and hard links, absolute paths, any path containing `..`, files matching env-file patterns (`.env`, `.env.*` except `.env.example`, `*.env`) at any depth, and archives over 10 MB compressed. The order of the checks is normative: `spec/archive.md` lists them in order and the first failure wins, so both implementations refuse with the same code.
+- **Harness ids everywhere.** The contract names a harness by id — `claude-code`, `copilot`, `kiro`, `codex` — in the project manifest, in `requires.harness`, in the lockfile and in the index. A package folder name such as `claude/` is not an id; `spec/harnesses.md` holds the mapping, and the registry derives a version's `harnesses` from the archive's top-level folders using it.
+- **URIs are a pattern, not `format: uri`.** `^https?://[!-~]+$`. Format assertions differ between validators: the Go one accepted `https://exämple.com/` where Ajv and `@cfworker/json-schema` refused it. A pattern is the same rule in all three. `http` stays allowed so `wrangler dev` and the end-to-end harness can use `http://127.0.0.1`.
 - **Hashes.** `sha256-<lowercase hex>` everywhere. Archive integrity is the hash of the stored archive bytes. File hashes are over raw file bytes with no line-ending normalisation. We never rewrite a client's file in order to compare it.
 - **Canonical JSON.** Used to hash array elements and scalar values in merge files. Object keys sorted bytewise, no insignificant whitespace, strings and numbers serialised as in RFC 8785. Defined in `spec/archive.md` with vectors.
 - **Codegen.** Go types and an HTTP client for the CLI. TypeScript types from `openapi-typescript`. The Worker validates at runtime against the same schema files with a validator that does not use `eval`, since Workers forbid it. M0 picks the Go generator: whichever of `oapi-codegen` and `ogen` handles our 3.1 spec without workarounds. The vectors are the real guard against drift. Generated types are a convenience.
@@ -63,7 +70,7 @@ src/
 migrations/    D1 SQL
 infra/         Pulumi program, one stack per client
 scripts/deploy.ts
-contract/      git subtree
+contract/      tree import of a contract tag, pinned in contract.lock
 ```
 
 ### Identity seam
@@ -100,10 +107,12 @@ In order, stopping at the first refusal:
 4. `hpm.json` validates against the schema. Name and version match the URL.
 5. `README.md` is present.
 6. `CHANGELOG.md` has a non-empty section for this version. Always, including the first version.
-7. The version is higher than every published version of the package.
-8. Trigger rule: for each `SKILL.md`, hash the frontmatter `description`. If any hash differs from the previous version's `triggers_json`, the changelog section must contain a line starting `Trigger:`.
+7. The version is higher than every published version of the package: equal to a published version is `version_exists`, lower than the highest published version is `version_not_higher`.
+8. Trigger rule: for each `SKILL.md`, hash the frontmatter `description`. If any hash differs from the previous version's `triggers_json`, the changelog section must contain a line starting `- Trigger:`.
 9. No file contains the scaffold marker `HPM-TODO`.
 10. Conditional put to R2, then insert into D1.
+
+Anything that throws rather than refusing is a `500 internal_error`. A Hono `onError` handler answering in the contract's error shape lands in M1, with the first route that can throw; M0 only adds the code to the contract.
 
 The D1 primary key is the immutability guard. A duplicate insert returns `409 version_exists`. If the insert fails after the R2 put, the orphaned object is harmless, and a retry may overwrite an object that has no row.
 
@@ -125,7 +134,7 @@ Go. `cobra` for commands, `Masterminds/semver` for ranges. `hpm` never runs git.
 
 ```
 cmd/hpm/             cobra wiring only: flags → call into internal → render
-contract/            git subtree
+contract/            tree import of a contract tag, pinned in contract.lock
 internal/
   api/               generated client and types
   manifest/          package manifest, project manifest, lockfile: load, validate, deterministic write
@@ -321,7 +330,7 @@ Test-first throughout. Most logic is pure, so most tests need no filesystem or n
 5. **Deployed smoke.** The last step of `deploy <client>`. Without a token, Access stops the request. With the CI service token, `GET /v1/index` returns 200. A publish and fetch round trip uses `@smoke/ping` at `0.0.<epoch>`, in a scope whose only member is that service token.
 6. **Real-tree acceptance.** Manual. `adopt` and `add` on a branch of each of the four projects. Measure the match rate against the 80% target and review the diff for noise. Every surprising diff becomes a corpus case.
 
-CI is GitHub Actions in each repo: lint, unit tests, the contract subtree tag check and the vector tests. The `cli` repo also runs the end-to-end suite.
+CI is GitHub Actions in each repo: lint, unit tests, the offline `contract/` tag and tree check, and the vector tests. The `cli` repo also runs the end-to-end suite.
 
 ## 8. Milestones
 
@@ -329,7 +338,7 @@ Each milestone gets its own implementation plan and ends in something that can b
 
 | # | Milestone | Delivers | Exit criterion |
 |---|---|---|---|
-| M0 | Contract and scaffolding | The contract repo with `openapi.yaml`, schemas, `spec/archive.md` and first vectors. Subtrees in `cli` and `registry`. Go module and Worker skeleton with codegen and CI. `metastack.yaml` gains `contract` and checks for `go` and `pulumi`. | CI green in three repos. Generated types compile on both sides. |
+| M0 | Contract and scaffolding | The contract repo with `openapi.yaml`, schemas, `spec/` and first vectors. Tree imports of a contract tag in `cli` and `registry`. Go module and Worker skeleton with codegen and CI. `metastack.yaml` gains `contract` and checks for `go` and `pulumi`. | CI green in three repos. Generated types compile on both sides. |
 | M1 | Walking skeleton | Registry: all four routes, the auth middleware against the test issuer, core publish checks (scope, schema, version exists, README). CLI: `init`, `publish <dir>`, `add`, `install`, `status`, for one package with no dependencies and plain files only, with the lockfile and plan-then-apply in place. The end-to-end harness with the fake Access proxy. | End-to-end steps 1 to 3 pass for a skill-only package. |
 | M2 | Deploy and real identity | The Pulumi stack and `deploy <client>`. `hpm login` through cloudflared. The service-token provider. The smoke test. The first `hpm.rb` in the tap. Getting-started page in docs. | Our own instance is live. A person and the CI token can each publish and install against it. |
 | M3 | Package model | The resolver with meta packages, ranges and registry routing. `update` with changelog output. `.hpm/` metadata. `search`, `info`, `new`, `version`. The full publish checks: changelog, trigger rule, `HPM-TODO`, env patterns. | End to end: a toolkit with a shared dependency installs, and `update` crosses versions and prints `Trigger:` lines. |
@@ -358,7 +367,9 @@ Written back to the PRD as v0.7.
 | Topic | Amendment |
 |---|---|
 | CLI language | Go, distributed through `updates.stackcube.dev` and the StackCube Homebrew tap. |
-| Contract | A separate repo holding OpenAPI 3.1, JSON Schema and golden vectors, subtreed into `cli` and `registry`. |
+| Contract | A separate repo holding OpenAPI 3.1, JSON Schema and golden vectors, imported at a tagged version into `cli` and `registry`. |
+| Index harness vocabulary | Harness ids everywhere; PRD §8 said folders. The id → folder table lives in `spec/harnesses.md`. |
+| Contract import | A plain tree import pinned by tree hash in `contract.lock`, not `git subtree`. |
 | Routes | Prefixed `/v1`. |
 | Identity | Access stays, per §9. Worker verification and CLI login sit behind a provider seam so that a direct OIDC issuer can replace Access later. |
 | Project manifest | A `registries` entry may be a URL string or an object with `url` and `auth`. |

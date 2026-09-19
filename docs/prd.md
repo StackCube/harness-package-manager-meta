@@ -167,7 +167,7 @@ The registry instance is the only thing we own. A person publishes from wherever
 
 Components and their single job:
 
-- **Contract.** A separate repo holding the OpenAPI 3.1 description of the registry routes, JSON Schemas for the package manifest, project manifest, lockfile and index, a normative archive and hashing spec, and golden test vectors. It is subtreed into the CLI and registry repos at a tagged version. The CLI is Go and the Worker is TypeScript, so the vectors are what proves the two agree on bytes and not just on types.
+- **Contract.** A separate repo holding the OpenAPI 3.1 description of the registry routes, JSON Schemas for the package manifest, project manifest, lockfile and index, a normative archive and hashing spec, and golden test vectors. It is imported at a tagged version into the CLI and registry repos. The CLI is Go and the Worker is TypeScript, so the vectors are what proves the two agree on bytes and not just on types.
 - **Package directories.** Anywhere with an `hpm.json`. Our monorepo, a client repo, or a project tree.
 - **Publisher.** The `hpm publish` command, run by a person or by CI holding a service token. Packs an archive and sends it to the registry with an Access identity.
 - **Cloudflare Access.** Sits in front of every registry route. Authenticates the person against the client's identity provider and attaches a signed JWT to the request. Trusts a person, not a device.
@@ -243,7 +243,7 @@ One toolkit, four components, one shared script. The resolver picks a single ver
 
 ### Support is declared by presence
 
-The index records which harness folders each version ships. A package supports Kiro if it has a `kiro/` folder. "Unsupported on this harness" means "the author has not ported this yet".
+The index records which harnesses each version ships, by harness id, derived from the folders present. A package supports Kiro if it has a `kiro/` folder. "Unsupported on this harness" means "the author has not ported this yet".
 
 > **Decided: Missing harness folder: warn by default, strict flag per project.**
 > By default the install continues, prints a warning naming the package and harness, and records the gap in the lockfile so status can show it. A project can set `"unsupported": "fail"` to refuse any install that is not fully ported for every harness it declares.
@@ -676,7 +676,7 @@ The smallest thing that proves the model end to end on a real client tree. Every
 
 ### Contract
 
-- A contract repo with the OpenAPI 3.1 description, JSON Schemas, the archive and hashing spec, and golden vectors, subtreed into the CLI and registry repos.
+- A contract repo with the OpenAPI 3.1 description, JSON Schemas, the archive and hashing spec, and golden vectors, imported at a tagged version into the CLI and registry repos.
 
 ### Registry
 
@@ -749,7 +749,8 @@ Copilot, Kiro and Codex adapters. Aliases. A second auth provider. The website. 
 | Cross-registry dependencies | Forbidden. Dependencies resolve within one registry. `hpm copy` re-publishes a package into another instance. | §7 |
 | Provenance | Publisher identity and timestamp from the Access JWT. Source commit optional. | §18 |
 | CLI language and distribution | Go. Binaries on `updates.stackcube.dev`, formula in the StackCube Homebrew tap. | §6, §20 |
-| Wire contract | A separate repo: OpenAPI 3.1, JSON Schema, archive spec, golden vectors. Subtreed into the CLI and registry. | §6, §20 |
+| Wire contract | A separate repo: OpenAPI 3.1, JSON Schema, archive spec, golden vectors. Imported at a tagged version into the CLI and registry. | §6, §20 |
+| Index harness vocabulary | Harness ids everywhere. The folder mapping lives in the contract spec. | §8 |
 | Route versioning | Every route is prefixed `/v1`. One error shape with stable codes. | §9 |
 | Identity portability | Access stays. Worker verification and CLI login sit behind a provider seam so a direct OIDC issuer can replace it. | §9, §16 |
 | Registry deployment | Pulumi stack per client for infrastructure. Wrangler for code and migrations. | §9 |
