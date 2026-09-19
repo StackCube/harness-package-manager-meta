@@ -49,12 +49,18 @@ checks:
   - name: git
     command: git --version
     required: true
+  - name: go
+    command: go version
+    min_version: "1.26"
+    required: true
   - name: bun
     command: bun --version
     required: true
-  - name: wrangler
-    command: wrangler --version
-    required: true
+  # Registry deploys, from M2. Not needed to build or test.
+  - name: pulumi
+    command: pulumi version
+    min_version: "3.200.0"
+    required: false
   - name: cloudflared
     command: cloudflared --version
     required: false

@@ -17,6 +17,7 @@ metastack status    # branch + working-tree state per repo
 
 | Name | Repo | What it is |
 |---|---|---|
+| `contract` | StackCube/harness-package-manager-contract | Wire contract: OpenAPI 3.1, JSON Schema, specs and golden vectors. Subtreed into `cli` and `registry` at a tag. |
 | `registry` | StackCube/harness-package-manager-registry | Registry instance: Cloudflare Worker behind Access, R2 for archives, D1 for the index. One deploy config per client. |
 | `cli` | StackCube/harness-package-manager-cli | The `hpm` CLI and the harness adapters. |
 | `packages` | StackCube/harness-package-manager-packages | Our own package source, one directory per package with per-harness folders. |
@@ -40,4 +41,4 @@ metastack status    # branch + working-tree state per repo
 
 ## Status
 
-Draft. The CLI name `hpm` is a placeholder. The `registry`, `cli` and `packages` repos exist but are empty. A `contract` repo (OpenAPI, JSON Schema, golden vectors) is created in milestone 0 and added to `metastack.yaml` then.
+Draft. The CLI name `hpm` is a placeholder. Milestone 0 is built: the contract is at v0.1.0, and `cli` and `registry` are scaffolded against it with green CI on open pull requests. Next is M1, the walking skeleton.
