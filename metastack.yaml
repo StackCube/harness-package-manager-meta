@@ -8,6 +8,11 @@
 #   name: local directory under repos/
 #   url:  <owner>/<repo> for gh
 repos:
+  # Wire contract: OpenAPI 3.1, JSON Schema, archive and hashing spec,
+  # golden vectors. Subtreed into cli and registry at a tag. Design §2.
+  - name: contract
+    url: StackCube/harness-package-manager-contract
+
   # Registry instance: Cloudflare Worker behind Access, R2 for archives,
   # D1 for packages, versions and scope members. One deploy config per client.
   # PRD §9, §20.
