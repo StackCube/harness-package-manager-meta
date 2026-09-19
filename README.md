@@ -2,12 +2,32 @@
 
 Versioned, composable distribution of skills, commands, agents, hooks, scripts and MCP configs across Claude Code, Kiro, GitHub Copilot and Codex, from a registry deployed per client into repos we do not own.
 
-This repo holds the product requirements and design decisions. Implementation lives elsewhere.
+This is the workspace root, managed by [metastack](https://github.com/StackCube/metastack). It holds the product requirements and the list of sibling repos the product is built across. The sibling repos are checked out under `./repos/` and are not tracked here.
 
-- [Product requirements document](docs/prd.md) — the full PRD, currently draft v0.5
+## Quick start
+
+```bash
+brew install stackcube/tap/metastack   # once
+metastack clone     # fetch every repo listed in metastack.yaml into ./repos/
+metastack doctor    # verify the toolchain
+metastack status    # branch + working-tree state per repo
+```
+
+## Repos
+
+| Name | Repo | What it is |
+|---|---|---|
+| `registry` | StackCube/harness-package-manager-registry | Registry instance: Cloudflare Worker behind Access, R2 for archives, D1 for the index. One deploy config per client. |
+| `cli` | StackCube/harness-package-manager-cli | The `hpm` CLI and the harness adapters. |
+| `packages` | StackCube/harness-package-manager-packages | Our own package source, one directory per package with per-harness folders. |
+
+`metastack.yaml` is the source of truth for this list. Add a repo with `metastack add StackCube/<repo>`.
+
+## Documents
+
+- [Product requirements document](docs/prd.md) — the full PRD, currently draft v0.6
+- [Iteration 1 prototype](docs/prd.md#20-iteration-1-prototype) — what the three repos above build first
 - [Decision log](docs/prd.md#22-decision-log) — every settled question and where it is written up
-- [Iteration 1 prototype](docs/prd.md#20-iteration-1-prototype) — the cut we are building first
-- [Open questions](docs/prd.md#23-open-questions)
 
 ## The idea in three lines
 
@@ -17,4 +37,4 @@ This repo holds the product requirements and design decisions. Implementation li
 
 ## Status
 
-Draft. The CLI name `hpm` is a placeholder.
+Draft. The CLI name `hpm` is a placeholder. The three sibling repos are named in `metastack.yaml` but not yet created.

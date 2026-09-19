@@ -1,0 +1,49 @@
+# harness-package-manager — metastack workspace.
+#
+# This repo is the workspace root. The product is built across the sibling
+# repos listed below, which `metastack clone` checks out under ./repos/.
+# The PRD that drives the split lives in docs/prd.md.
+
+# Repos managed by this workspace.
+#   name: local directory under repos/
+#   url:  <owner>/<repo> for gh
+repos:
+  # Registry instance: Cloudflare Worker behind Access, R2 for archives,
+  # D1 for packages, versions and scope members. One deploy config per client.
+  # PRD §9, §20.
+  - name: registry
+    url: StackCube/harness-package-manager-registry
+
+  # The hpm CLI: adopt, add, install, update, status, publish, and the
+  # Claude Code adapter. PRD §15, §20.
+  - name: cli
+    url: StackCube/harness-package-manager-cli
+
+  # Our own package source: one directory per package with per-harness
+  # folders, plus the meta package our projects share. PRD §8, §11.
+  - name: packages
+    url: StackCube/harness-package-manager-packages
+
+# Tools verified by `metastack doctor`.
+#   command:     smoke test (non-zero exit = fail)
+#   min_version: optional; semver-ish parse from stdout
+#   required:    true → hard fail; false → warn only
+checks:
+  - name: gh
+    command: gh auth status
+    required: true
+  - name: git
+    command: git --version
+    required: true
+  - name: bun
+    command: bun --version
+    required: true
+  - name: wrangler
+    command: wrangler --version
+    required: true
+  - name: cloudflared
+    command: cloudflared --version
+    required: false
+  - name: jq
+    command: jq --version
+    required: false

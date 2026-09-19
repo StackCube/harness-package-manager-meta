@@ -1,0 +1,8 @@
+# Managed repos — cloned/managed by this workspace, never tracked here.
+/repos/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
